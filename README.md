@@ -26,7 +26,7 @@
 
 ```bash
 # 下载脚本
-wget -O tcp_tuning.sh 失效的下载链接
+wget -O tcp_tuning.sh https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/tcp_tuning.sh
 # 给脚本执行权限
 chmod +x tcp_tuning.sh
 # 移动脚本到全局可执行目录（如果需要）
@@ -85,15 +85,3 @@ sudo tcp_tuning.sh --help # 查看帮助信息
 ## ⍰ 免责声明
 
 使用你这个脚本及其中包含的任何代码都是由们自己的风险。项目维护者对因使用此脚本而造成的任何损失不承担责任。
-
-## 📜许可证
-
-该项目根据 MIT 许可证进行授权。如MIT将在LICENSE归档更。
-
-### 更新
-
-- 最后更新: `<更新日期>`
-- 调整接轨: `<支持特版本号>`
-```
-
-请注意，您需要将 `README.md` 文件中的 `<失效的下载链接>` 和 `<支持的最新版本号>` 替换为对应的链接和具体的版本号。上述的例子已经链接到您的 GitHub 仓库中的 `tcp_tuning.sh`, 因此更新相应的内容就可以了。
