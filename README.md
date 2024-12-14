@@ -1,6 +1,4 @@
-以下是考虑到您的`tcp_tuning.sh`的 `README.md` 文件内容：
 
-```markdown
 # TCP Tuning🏃🌿
 
 这是一个用 Bash 设计的脚本，用于通过配置 BBR 和调度器来优化 TCP，以及调整其他系统参数。
