@@ -1,87 +1,95 @@
+请使用以下内容更新`README.md`以反映新脚本的功能和一键安装选项：
 
-# TCP Tuning🏃🌿
+```markdown
 
-这是一个用 Bash 设计的脚本，用于通过配置 BBR 和调度器来优化 TCP，以及调整其他系统参数。
+# TCP Tuning Script
 
-## 概述
+这是一个为您的 Linux 系统设计的 Bash 脚本来帮助自动化 TCP 调优,提供提高网络性能的解决方案。该脚本提供自动配置 BBR 以及其他关键系统参数,同时支持用户自定义选择不同的队列调度器。
 
-此脚本提供了一套系统的 TCP 和网络调优功能，如下：
+## 支持的特性
+- **BBR (Bottleneck Bandwidth and RTT) 配置**: 设置默认TCP拥塞控制算法为BBR，并将队列调度器切换到`cake`。
+- **TCP参数优化**: 调整TCP参数来提升网络和系统的性能。
+- **缓冲区调整**: 配置TCP和UDP缓冲区大小，以优化网络流量。
+- **文件描述符限制**: 增加文件描述符限制以支持更高的并发连接。
 
-- 自动检测并配置 BBR (Bottleneck Bandwidth and RTT) 协议。
-- 设置默认的队列调度器，可以选择多个支持的调度器。
-- 调整系统涉及的关键 TCP 参数提高性能。
-- 调整TCP和UDP的缓冲区大小。
-- 文件描述符限制的提升。
+## 脚本地址
 
-此脚本的目标是在不同场景中优化网络性能。
+- **下载 URL**: [GitHub Raw URL](https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/tcp_tuning.sh)
 
 ## 准备工作
 
-确保您的运行环境支持以下内容:
-- Linux 内核支持 BBR 和您选择的调度器。
-- 以 root 或使用 `sudo` 运行脚本。
+系统配置要求：
 
-## 下载和安装
-可以通过以下步骤安装此脚本：
+- 您的系统必须支持 BBR 和 `cake` 队列策略。
+- 脚本需要以 `root` `超级用户执行权限运行。
+- 更改配置可能会影响您的系统或服务的性能，务必保证备份和测试评估。
+
+## 一键安装并配置
 
 ```bash
-# 下载脚本
-wget -O tcp_tuning.sh https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/tcp_tuning.sh
-# 给脚本执行权限
-chmod +x tcp_tuning.sh
-# 移动脚本到全局可执行目录（如果需要）
-mv tcp_tuning.sh /usr/local/bin/
+# 一键安装并使用脚本
+# 注意，此脚本将在执行时设置 root 或超级用户权限
+wget -O /tmp/tcp_tuning.sh https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/tcp_tuning.sh && sudo bash /tmp/tcp_tuning.sh
 ```
+
+### 说明：
+- 此脚本会自动将自己移动到 `/usr/local/sbin/`.
+- 安装后，您将被引导进行配置选择操作。
+- 提供安装过程中的确认，允许用户随时结束或继续配置。
+
 ## 使用
 
-使用方式示例有：
+### 手动执行
+如果您不想使用一键安装功能，可以手动运行脚本：
 
 ```bash
-sudo ./tcp_tuning.sh --qdisc cake # 使用Cake调度器配置
-sudo tcp_tuning.sh --undo # 撤消最后的配置更改
-sudo tcp_tuning.sh --help # 查看帮助信息
+# 从 GitHub 下载脚本
+wget -O tcp_tuning.sh https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/tcp_tuning.sh
+
+# 脚本授权限
+chmod +x tcp_tuning.sh
+
+# 移动脚本到全局可执行目录
+sudo mv tcp_tuning.sh /usr/local/sbin/
+
+# 运行脚本
+sudo tcp_tuning.sh
 ```
 
-### 参数详细：
+### 参数详解
 
-- `--qdisk <queue_discipline>`: 指定您想使用的队列调度器。默认的调度器为 fq。
-- `--help`: 显示此帮助信息
-- `--undo`: 撤消最近的配置更改，您需要一个备份的 `sysctl.conf`。
+- `none`: 使用默认配置，提供用户选择选项。
+- `--help`: 查看帮助信息。
+- `--qdisc <queue_discipline>`: 如需要，可以手动指定队列调度策略（e.g. `fq`, `cake`, etc.）。
 
-若未使用参数，将提供交互式选项来配置网络优化参数的选项。
+## 注意事项
 
-## 使用限制
-
-- 为了安全性考虑，请确保运行此脚本时错了条之前备份了关键文件。
-- TCP和系统配置的更改可能会对整个系统产生未知影响，因此请在非关键环境中进行测试。
-- 如果您不确定该脚本执行的每一步骤，请专业的 system administrator 
-- 此脚本的配置可以在系统重启后通过`sysctl -p`命令重新应用或 automated。
+- 本脚本直接配置系统，可能会影响到应用程序或服务的网络行为。在应用之前请进行备份和测试。
+- 配置更改会在系统启动时需要以 `sysctl -p` 重新应用，请确保在系统运行时及时恢复默认配置。
+- 错误处理和日志机制的增强可确保脚本执行过程中的错误检测和问题排查。
+- 请了解运行时所需的超级用户权限，以确保脚本能够正确执行系统设置。
 
 ## 支持的环境
 
-本脚本已在如下环境中测试：
+- **操作系统**: 基于 Linux 的环境 (如 CentOS, Ubuntu, Debian)。
+- **内核**: 需支持 BBR 和 `cake` 调度器的内核。此脚本默认配置`cake`为默认项，将不再检测BBR版本。
+- **网络协议**: TCP 相关优化，默认支持 IPv4 环境。
 
-- **操作系统**: Linux (CentOS, Ubuntu 等)
-- **内核**: 支持 BBR v3 和您选定的调度器的内核
-- **IPv**: 原生 IPv4, 对于 IPv6 可能需要适应调整
+## 向脚本贡献
 
-确保在 `README.md` 文件中合理的链接是以还原配置或判断支持情况的`script URL`。[点此下载脚本](失效的脚本名称不用下载)
+如果您想为脚本的进一步改进做出贡献或提交改进请求：
 
-## 鸣谢
-这个效率模块代码很多建设性的建议和改进，由社区参与者共同努力下形成的。
+1. **Fork 项目**: 将仓库复制到您自己的 GitHub 账户中。
+2. **分支**: 创建一个新分支来进行开发工作。
+3. **测试**: 新增测试用例或验证已有的功能。
+4. **Pull Request**: 通过向源项目提交请求来提议您的更改。
 
-如果你发现任何建议或问题，请通过 GitHub 的 issue tracker 或直接通过 "contributing" 来优化或修改脚本。
+所有讨论、共享建议与使用情况建议，都可以在 [GitHub页面](https://github.com/mingmenmama/TCP-Tuning) 中找到。
 
-## ⬆️向你的脚本贡献改进
+### 更新历史
 
-我们欢迎所有优化建议、改进某个特性或修复问题的贡献！ 请遵循如下步调:
+- **最后更新**: `<Last Update Date>`
+- **支持版本**: `<Version Number>` 更新后请记得替换此标记。
+```
 
-- 复刻这个仓库到您的账户。
-- 在新的分支上工作。
-- 比完工时，提交一个 pull request。
-
-在您做任何变更之前，请确保为此脚本添加了完整的测试用例。
-
-## ⍰ 免责声明
-
-使用你这个脚本及其中包含的任何代码都是由们自己的风险。项目维护者对因使用此脚本而造成的任何损失不承担责任。
+请确保将 `<Last Update Date>` 和 `<Version Number>` 替换为适当的值来反映最新更新日期和脚本版本。
