@@ -1,89 +1,151 @@
 #!/bin/bash
+# tcp_tuning.sh - 一键TCP调优脚本（改进版）
+# 支持调度器参数化选项，增加其他调度器选项及说明
 
-# 定义函数
-configure_bbr() {
-    echo "正在配置 BBR..."
-    echo "net.core.default_qdisc=cake" | sudo tee -a /etc/sysctl.conf > /dev/null
-    echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.conf > /dev/null
-    sudo sysctl -p > /dev/null
-    echo -e "\e[32mBBR 和 cake 配置成功。\e[0m"
-}
+# 检查是否为root用户运行
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run as root"
+    exit 1
+fi
 
-### 配置模块
-tune_tcp_parameters() {
-    echo "调整 TCP 参数..."
-    local params_list=(
-        "net.ipv4.tcp_no_metrics_save=1"
-        "net.ipv4.tcp_moderate_rcvbuf=1"
-        "net.ipv4.tcp_ecn=1"
-        "net.core.somaxconn=32768"
-        "net.core.netdev_max_backlog=5000"
-        "net.ipv4.tcp_slow_start_after_idle=0"
-        "net.ipv4.tcp_tw_reuse=1"
-        "net.ipv4.tcp_fin_timeout=30"
-        "kernel.sched_migration_cost_ns=5000000"
-        "net.ipv4.ip_forward=1"
-    )
-    for param in "${params_list[@]}"; do
-        echo "$param" | sudo tee -a /etc/sysctl.conf > /dev/null || return 1
+# 可用调度器选项及说明
+declare -A QDISC_OPTIONS=(
+    ["fq"]="Fair Queuing (fq): 默认调度器，平衡带宽分配，适合大多数场景。"
+    ["cake"]="Cake: 针对家庭网络设计，优化低延迟和公平性，支持高吞吐量场景。"
+    ["pfifo_fast"]="PFIFO_FAST: 适合低流量环境的简单队列。"
+    ["sfq"]="Stochastic Fairness Queuing (sfq): 提供流量公平性，但不适合高负载场景。"
+    ["htb"]="Hierarchical Token Bucket (htb): 提供流量整形功能，适用于复杂的流量管理。"
+    ["fq_codel"]="FQ-CoDel: 减少队列延迟，适合解决缓冲膨胀问题。"
+    ["noqueue"]="NoQueue: 禁用队列调度，适用于回环接口或特殊场景。"
+    ["bfifo"]="BFIFO: 基于简单FIFO队列，适合低负载或嵌入式设备。"
+)
+
+# 显示可用调度器和说明
+function show_qdisc_options() {
+    echo "Available queue disciplines:"
+    for qdisc in "${!QDISC_OPTIONS[@]}"; do
+        echo "  $qdisc - ${QDISC_OPTIONS[$qdisc]}"
     done
-    echo 1 | sudo tee /proc/sys/net/ipv4/conf/all/forwarding > /dev/null
-    sudo sysctl -p > /dev/null
-    echo -e "\e[32mTCP 参数配置成功。\e[0m"
+    echo ""
 }
 
-tune_buffer_sizes() {
-    echo "调整缓冲区..."
-    echo "net.core.rmem_max=16777216" | sudo tee -a /etc/sysctl.conf > /dev/null
-    echo "net.core.wmem_max=16777216" | sudo tee -a /etc/sysctl.conf > /dev/null
-    echo "net.ipv4.tcp_rmem=4096 87380 16777216" | sudo tee -a /etc/sysctl.conf > /dev/null
-    echo "net.ipv4.tcp_wmem=4096 65536 16777216" | sudo tee -a /etc/sysctl.conf > /dev/null
-    sudo sysctl -p > /dev/null
-    echo -e "\e[32m缓冲区配置成功。\e[0m"
+# 显示帮助信息
+function show_help() {
+    echo "Usage: sudo ./tcp_tuning.sh [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --qdisc <fq|cake|pfifo_fast|sfq|htb|fq_codel|noqueue|bfifo>"
+    echo "                      Set queue discipline (default: fq)"
+    echo "  --help              Show this help message"
+    echo ""
+    echo "Example: sudo ./tcp_tuning.sh --qdisc cake"
+    exit 0
 }
 
-set_ulimit() {
-    if ! grep -q "root soft nofile" /etc/security/limits.conf; then
-        echo -e "root soft nofile 51200\n\nroot hard nofile 64000" | sudo tee -a /etc/security/limits.conf > /dev/null
-        echo -e "\e[32m已配置文件描述符限制。\e[0m"
-    fi
-}
-
-# 定义安装函数
-install_tcp_tuning() {
-    echo "是否立即配置以下模块？"
-    PS3="请选择-"
-    local options=("BBR 设置" "TCP 参数优化" "缓冲区优化" "文件描述符限制" "退出")
-
-    while true; do
-        select choice in "${options[@]}"; do
-            case $choice in 
-                "BBR 设置") configure_bbr || return 1;;
-                "TCP 参数优化") tune_tcp_parameters || return 1;;
-                "缓冲区优化") tune_buffer_sizes || return 1;;
-                "文件描述符限制") set_ulimit || return 1;;
-                "退出")
-                    return 0
-                    ;;
-                *) echo "无效选项。";;
-            esac
-            echo "继续？(yes/no,直接回车选Y):"
-            read -r ans
-            [[ -z "$ans" ]] && ans=y
-            if [ "$ans" != "y" ] && [ "$ans" != "yes" ]; then
-                    return 0
+# 解析参数
+DEFAULT_QDISC="fq"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --qdisc)
+            if [[ -n "${QDISC_OPTIONS[$2]}" ]]; then
+                DEFAULT_QDISC="$2"
+                shift 2
+            else
+                echo "Invalid qdisc option: $2"
+                show_qdisc_options
+                exit 1
             fi
-        done
-    done
+            ;;
+        --help)
+            show_help
+            ;;
+        *)
+            echo "Unknown option: $1"
+            show_help
+            ;;
+    esac
+done
+
+echo "Selected queue discipline: $DEFAULT_QDISC - ${QDISC_OPTIONS[$DEFAULT_QDISC]}"
+
+# 模块1: 检测并配置BBR
+function configure_bbr() {
+    echo "Checking BBR version..."
+
+    # 检查BBR支持情况
+    local bbr_version
+    bbr_version=$(sysctl net.ipv4.tcp_available_congestion_control | grep -oE 'bbr[0-9]?')
+
+    if [[ $bbr_version != "bbr3" ]]; then
+        echo "Error: BBR v3 is required for this script."
+        echo "Current BBR version detected: ${bbr_version:-None}"
+        exit 1
+    fi
+
+    echo "BBR v3 detected. Configuring BBR and $DEFAULT_QDISC..."
+
+    # 配置BBR和调度器
+    cat <<EOF >>/etc/sysctl.conf
+
+# BBR v3 配置
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = $DEFAULT_QDISC
+EOF
 }
 
-# 脚本入口,用户选择执行
-sudo bash << EOF
-    echo "正在安装 TCP 调优脚本..."
-    chmod +x tcp_tuning.sh
-    mv tcp_tuning.sh /usr/local/sbin/
-    
-    echo -e "\e[32m安装成功！脚本位于 /usr/local/sbin/tcp_tuning.sh\e[0m"
-    install_tcp_tuning
-    echo -e "\e[32m配置完成，记得使用 'sysctl -p' 以应用更改。\e[0m"
+# 模块2: 调整TCP基本参数
+function configure_tcp_params() {
+    echo "Configuring TCP parameters..."
+    cat <<EOF >>/etc/sysctl.conf
+
+# TCP基本参数调优
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 4096
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_fack = 1
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_adv_win_scale = 1
+net.ipv4.tcp_moderate_rcvbuf = 1
 EOF
+}
+
+# 模块3: 配置缓冲区
+function configure_buffers() {
+    echo "Configuring TCP buffers..."
+    cat <<EOF >>/etc/sysctl.conf
+
+# 缓冲区大小调优
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.ipv4.tcp_rmem = 4096 87380 33554432
+net.ipv4.tcp_wmem = 4096 16384 33554432
+net.ipv4.udp_rmem_min = 8192
+net.ipv4.udp_wmem_min = 8192
+EOF
+}
+
+# 模块4: 提升文件描述符限制
+function configure_file_descriptors() {
+    echo "Configuring file descriptor limits..."
+    echo "* soft nofile 2097152" >> /etc/security/limits.conf
+    echo "* hard nofile 2097152" >> /etc/security/limits.conf
+    echo "root soft nofile 2097152" >> /etc/security/limits.conf
+    echo "root hard nofile 2097152" >> /etc/security/limits.conf
+}
+
+# 应用配置
+function apply_sysctl() {
+    echo "Applying sysctl configuration..."
+    sysctl -p
+}
+
+# 执行模块
+configure_bbr
+configure_tcp_params
+configure_buffers
+configure_file_descriptors
+apply_sysctl
+
+# 提示成功信息
+echo "TCP tuning applied successfully!"
