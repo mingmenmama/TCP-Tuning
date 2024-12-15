@@ -22,6 +22,8 @@
    - 将代码库克隆或下载到您的系统中。
      ```bash
      wget https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/net_opt.sh
+     chmod +x net_opt.sh
+     sudo ./net_opt.sh
      ```
 
 2. **设置权限**:
