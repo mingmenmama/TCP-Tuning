@@ -21,8 +21,7 @@
 1. **获取脚本代码**:
    - 将代码库克隆或下载到您的系统中。
      ```bash
-     git clone [您的GitHub存储库地址]
-     cd [脚本的目录]
+     git clone https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/net_opt.sh
      ```
 
 2. **设置权限**:
