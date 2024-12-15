@@ -1,151 +1,77 @@
 #!/bin/bash
-# tcp_tuning.sh - 一键TCP调优脚本（改进版）
-# 支持调度器参数化选项，增加其他调度器选项及说明
 
-# 检查是否为root用户运行
-if [[ $EUID -ne 0 ]]; then
-    echo "This script must be run as root"
+# 作者: Code Companion
+# 许可证: MIT
+# 描述: 一键网络优化脚本 for Linux 系统
+
+sysctl_file='/etc/sysctl.conf'
+
+echo "开始应用网络优化参数..."
+
+function apply_param {
+    echo "正在应用参数: $1 = $2"
+    echo "$1 = $2" >> $sysctl_file
+}
+
+# 以下是一个参数调整的函数示例:
+# 参数说明: $1是参数标题, $2是参数简述, $3是参数名, $4是参数值, $5是可选地标注
+function apply_params {
+    echo 
+    echo "正在优化 ${1}:"
+    echo "${2}"
+    echo 
+    apply_param "$3" "$4"
+}
+
+# 批量应用参数配置
+apply_params "监听套接字队列" "提高最大监听队列深度，增强并发连接能力" "net.core.somaxconn" "4096"
+apply_params "同步设置队列" "设置高并发的 SYN 请求队列" "net.ipv4.tcp_max_syn_backlog" "4096"
+
+# TCP 性能和安全性相关的参数
+apply_params "SYN cookies" "在 SYN 攻击时保持网络服务可用性" "net.ipv4.tcp_syncookies" "1"
+apply_params "TCP 时间戳" "增强网络安全并启用精细化的 rtt 测量" "net.ipv4.tcp_timestamps" "1"
+apply_params "time-wait 回收" "不推荐启用旧版本内核中的这个参数" "net.ipv4.tcp_tw_recycle" "0"
+apply_params "time-wait 复用" "不推荐启用旧版本内核中的这个参数" "net.ipv4.tcp_tw_reuse" "0"
+apply_params "TCP keep-alive 时间" "较长时间无数据的连接会自动关闭" "net.ipv4.tcp_keepalive_time" "7200"
+apply_params "TCP 最终状态超时" "降低连接在最后状态停留的时间，提高资源利用效率" "net.ipv4.tcp_fin_timeout" "30"
+apply_params "系统自动重启" "设置为-1，不自动重启，但根据具体要求设置时间（秒）" "kernel.panic" "-1"
+apply_params "交换内存使用" "降低系统使用交换空间的频率" "vm.swappiness" "0"
+
+# 一些不推荐开启的参数
+apply_params "TCP 不保存指标" "减少资源占用，适用于高吞吐量服务器" "net.ipv4.tcp_no_metrics_save" "1"
+apply_params "显式拥塞通知" "关闭可能增加网络复杂性的 ECN 功能" "net.ipv4.tcp_ecn" "0"
+apply_params "快速重传超时" "关闭旧版本内核时可能不会提供任何优势的 F-RTO" "net.ipv4.tcp_frto" "0"
+
+# TCP 数据传输的优化
+apply_params "MTU 探测" "关闭，以简化网络栈" "net.ipv4.tcp_mtu_probing" "0"
+apply_params "协议补丁1337" "关闭因可能带来不必要的优化而设置为0" "net.ipv4.tcp_rfc1337" "0"
+apply_params "TCP 分解段最大数量" "如过高，可能会影响稳定性，设置上限为256" "net.ipv4.tcp_max_tso_segs" "256"
+apply_params "TCP 分解段最小数量" "确保分段最小化，优化网络资源使用" "net.ipv4.tcp_min_tso_segs" "2"
+
+# 高速网络传输相关的缓存大小调整
+apply_params "TCP SACK(F)" "启用选择性确认和前向确认，改善网络稳定性" "net.ipv4.tcp_sack" "1" "[F] "
+apply_params "TCP 窗口缩放" "支持大容量数据传输" "net.ipv4.tcp_window_scaling" "1"
+apply_params "自动调整接受缓冲区" "维持接受窗口大小，防止缓冲区溢出" "net.ipv4.tcp_moderate_rcvbuf" "1"
+apply_params "接受缓冲区最大值" "设置 max 大小以处理更高的网络吞吐量" "net.core.rmem_max" "33554432"
+apply_params "发送缓冲区最大值" "设置 max 大小以处理更高的网络吞吐量" "net.core.wmem_max" "33554432"
+apply_params "网络设备背压队列长度" "减少网络接口上的数据包聚积" "net.core.netdev_max_backlog" "5000"
+
+# 使用 Cake QDisc
+# 注意: 不同Linux发行版可能会有不同的方法加载 Cake QDisc
+# 在某些情况下可能需要先安装相应的模块或包
+apply_params "设置 QDisc" "使用 Cake 作为默认队列管理器，提供公平性和高效的网络带宽管理" "net.core.default_qdisc" "cake"
+
+# 加载新设置
+echo "相关内核参数已更新，当前加载中..."
+sysctl -p $sysctl_file && {
+    echo "系统设置已成功重载, 优化完成。"
+} || {
+    echo "系统设置重载失败, 请查看详细信息。"
     exit 1
-fi
-
-# 可用调度器选项及说明
-declare -A QDISC_OPTIONS=(
-    ["fq"]="Fair Queuing (fq): 默认调度器，平衡带宽分配，适合大多数场景。"
-    ["cake"]="Cake: 针对家庭网络设计，优化低延迟和公平性，支持高吞吐量场景。"
-    ["pfifo_fast"]="PFIFO_FAST: 适合低流量环境的简单队列。"
-    ["sfq"]="Stochastic Fairness Queuing (sfq): 提供流量公平性，但不适合高负载场景。"
-    ["htb"]="Hierarchical Token Bucket (htb): 提供流量整形功能，适用于复杂的流量管理。"
-    ["fq_codel"]="FQ-CoDel: 减少队列延迟，适合解决缓冲膨胀问题。"
-    ["noqueue"]="NoQueue: 禁用队列调度，适用于回环接口或特殊场景。"
-    ["bfifo"]="BFIFO: 基于简单FIFO队列，适合低负载或嵌入式设备。"
-)
-
-# 显示可用调度器和说明
-function show_qdisc_options() {
-    echo "Available queue disciplines:"
-    for qdisc in "${!QDISC_OPTIONS[@]}"; do
-        echo "  $qdisc - ${QDISC_OPTIONS[$qdisc]}"
-    done
-    echo ""
 }
 
-# 显示帮助信息
-function show_help() {
-    echo "Usage: sudo ./tcp_tuning.sh [OPTIONS]"
-    echo ""
-    echo "Options:"
-    echo "  --qdisc <fq|cake|pfifo_fast|sfq|htb|fq_codel|noqueue|bfifo>"
-    echo "                      Set queue discipline (default: fq)"
-    echo "  --help              Show this help message"
-    echo ""
-    echo "Example: sudo ./tcp_tuning.sh --qdisc cake"
-    exit 0
-}
+# 如果 Cake 需要作为接口的默认 QDisc，使用如下命令(执行后需要网络重启)
+ip link set dev eth0 qdisc cake
 
-# 解析参数
-DEFAULT_QDISC="fq"
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --qdisc)
-            if [[ -n "${QDISC_OPTIONS[$2]}" ]]; then
-                DEFAULT_QDISC="$2"
-                shift 2
-            else
-                echo "Invalid qdisc option: $2"
-                show_qdisc_options
-                exit 1
-            fi
-            ;;
-        --help)
-            show_help
-            ;;
-        *)
-            echo "Unknown option: $1"
-            show_help
-            ;;
-    esac
-done
-
-echo "Selected queue discipline: $DEFAULT_QDISC - ${QDISC_OPTIONS[$DEFAULT_QDISC]}"
-
-# 模块1: 检测并配置BBR
-function configure_bbr() {
-    echo "Checking BBR version..."
-
-    # 检查BBR支持情况
-    local bbr_version
-    bbr_version=$(sysctl net.ipv4.tcp_available_congestion_control | grep -oE 'bbr[0-9]?')
-
-    if [[ $bbr_version != "bbr3" ]]; then
-        echo "Error: BBR v3 is required for this script."
-        echo "Current BBR version detected: ${bbr_version:-None}"
-        exit 1
-    fi
-
-    echo "BBR v3 detected. Configuring BBR and $DEFAULT_QDISC..."
-
-    # 配置BBR和调度器
-    cat <<EOF >>/etc/sysctl.conf
-
-# BBR v3 配置
-net.ipv4.tcp_congestion_control = bbr
-net.core.default_qdisc = $DEFAULT_QDISC
-EOF
-}
-
-# 模块2: 调整TCP基本参数
-function configure_tcp_params() {
-    echo "Configuring TCP parameters..."
-    cat <<EOF >>/etc/sysctl.conf
-
-# TCP基本参数调优
-net.core.somaxconn = 4096
-net.ipv4.tcp_max_syn_backlog = 4096
-net.ipv4.tcp_timestamps = 1
-net.ipv4.tcp_sack = 1
-net.ipv4.tcp_fack = 1
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_adv_win_scale = 1
-net.ipv4.tcp_moderate_rcvbuf = 1
-EOF
-}
-
-# 模块3: 配置缓冲区
-function configure_buffers() {
-    echo "Configuring TCP buffers..."
-    cat <<EOF >>/etc/sysctl.conf
-
-# 缓冲区大小调优
-net.core.rmem_max = 33554432
-net.core.wmem_max = 33554432
-net.ipv4.tcp_rmem = 4096 87380 33554432
-net.ipv4.tcp_wmem = 4096 16384 33554432
-net.ipv4.udp_rmem_min = 8192
-net.ipv4.udp_wmem_min = 8192
-EOF
-}
-
-# 模块4: 提升文件描述符限制
-function configure_file_descriptors() {
-    echo "Configuring file descriptor limits..."
-    echo "* soft nofile 2097152" >> /etc/security/limits.conf
-    echo "* hard nofile 2097152" >> /etc/security/limits.conf
-    echo "root soft nofile 2097152" >> /etc/security/limits.conf
-    echo "root hard nofile 2097152" >> /etc/security/limits.conf
-}
-
-# 应用配置
-function apply_sysctl() {
-    echo "Applying sysctl configuration..."
-    sysctl -p
-}
-
-# 执行模块
-configure_bbr
-configure_tcp_params
-configure_buffers
-configure_file_descriptors
-apply_sysctl
-
-# 提示成功信息
-echo "TCP tuning applied successfully!"
+# 如果QDisc变更成功，重启网络服务以生效
+echo "网络优化完成，现在请您手动重启网络服务以加载新QDisc设置。"
