@@ -18,31 +18,18 @@
 
 ### 使用指南
 
-1. **获取脚本代码**: 2. **设置权限**: 3. **运行脚本**:
+1. ---------  自己的 -------
    - 将代码库克隆或下载到您的系统中。
      ```bash
-     wget https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/net_opt.sh
-     chmod +x net_opt.sh
-     sudo ./net_opt.sh
+     wget https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/net_opt.sh && chmod +x net_opt.sh && sudo ./net_opt.sh
      ```
 
-2. **Cake QDisc支持情况**：
-   - 对于可能不附带`cake`模块的系统，需要自行安装`cake`QDisc。可通过下方示例安装模块（以Debian系为例），或依据发行版文档进行相关配置：
+2. ---------  别人的 -------
+   - 将代码库克隆或下载到您的系统中
      ```bash
-     sudo apt update
-     sudo apt install sch-cake
+     wget https://raw.githubusercontent.com/mingmenmama/TCP-Tuning/refs/heads/main/other.sh && chmod +x other.sh && sudo ./other.sh
      ```
 
-3. **应用QDisc**:
-   - 脚本调整完成后，你需要手动重启网络服务或直接设置接口的QDisc：
-   - # 以`eth0`接口为例
-     ```bash
-     sudo ip link set dev eth0 qdisc cake
-     ```
-     或者     # 重启网络服务示例（可能因发行版不同）
-     ```bash
-     sudo systemctl restart networking
-     ```
 
 ## 参数说明
 
