@@ -1,69 +1,212 @@
 #!/bin/bash
 
-# 作者: Code Companion
-# 许可证: MIT
+# 作者: mingmenmama
 # 描述: 一键网络优化脚本 for Linux 系统
+# 许可证: MIT
 
-sysctl_file='/etc/sysctl.conf'
+set -euo pipefail
 
-echo "开始应用网络优化参数..."
+LOG_FILE="/var/log/network_optimization.log"
+BACKUP_DIR="/root/system_backup"
+SYSCTL_FILE="/etc/sysctl.conf"
+DEFAULT_QDISC="fq"
 
-function apply_param {
-    echo "正在应用参数: $1 = $2"
-    echo "$1 = $2" >> $sysctl_file
+echo "开始网络优化..."
+mkdir -p "$BACKUP_DIR"
+
+# 日志函数
+log() {
+    echo "$1" | tee -a "$LOG_FILE"
 }
 
-function apply_params {
-    echo 
-    echo "正在优化 ${1}:"
-    echo "${2}"
-    echo 
-    apply_param "$3" "$4"
+# 备份文件
+backup_file() {
+    local file=$1
+    if [ -f "$file" ]; then
+        cp "$file" "$BACKUP_DIR/$(basename "$file").bak.$(date +%F-%H%M%S)"
+        log "已备份 $file 到 $BACKUP_DIR"
+    fi
 }
 
-# 移除或注释已弃用的参数
-sed -i '/net.ipv4.tcp_tw_recycle/d' $sysctl_file
-sed -i '/net.ipv4.tcp_max_tso_segs/d' $sysctl_file
+# 检测硬件配置
+detect_hardware() {
+    log "检测硬件配置..."
+    local total_memory_mb=0
+    local cpu_cores=0
 
-# 批量应用参数配置
-apply_params "监听套接字队列" "提高最大监听队列深度，增强并发连接能力" "net.core.somaxconn" "4096"
-apply_params "同步设置队列" "设置高并发的 SYN 请求队列" "net.ipv4.tcp_max_syn_backlog" "4096"
-apply_params "SYN cookies" "在 SYN 攻击时保持网络服务可用性" "net.ipv4.tcp_syncookies" "1"
-apply_params "TCP 时间戳" "增强网络安全并启用精细化的 rtt 测量" "net.ipv4.tcp_timestamps" "1"
-apply_params "time-wait 复用" "不推荐启用旧版本内核中的这个参数" "net.ipv4.tcp_tw_reuse" "0"
-apply_params "TCP keep-alive 时间" "较长时间无数据的连接会自动关闭" "net.ipv4.tcp_keepalive_time" "7200"
-apply_params "TCP 最终状态超时" "降低连接在最后状态停留的时间，提高资源利用效率" "net.ipv4.tcp_fin_timeout" "30"
-apply_params "系统自动重启" "设置为-1，不自动重启，但根据具体要求设置时间（秒）" "kernel.panic" "-1"
-apply_params "交换内存使用" "降低系统使用交换空间的频率" "vm.swappiness" "0"
-apply_params "TCP 不保存指标" "减少资源占用，适用于高吞吐量服务器" "net.ipv4.tcp_no_metrics_save" "1"
-apply_params "显式拥塞通知" "关闭可能增加网络复杂性的 ECN 功能" "net.ipv4.tcp_ecn" "0"
-apply_params "快速重传超时" "关闭旧版本内核时可能不会提供任何优势的 F-RTO" "net.ipv4.tcp_frto" "0"
-apply_params "MTU 探测" "关闭，以简化网络栈" "net.ipv4.tcp_mtu_probing" "0"
-apply_params "协议补丁1337" "关闭因可能带来不必要的优化而设置为0" "net.ipv4.tcp_rfc1337" "0"
-apply_params "TCP 分解段最小数量" "确保分段最小化，优化网络资源使用" "net.ipv4.tcp_min_tso_segs" "2"
-apply_params "TCP SACK(F)" "启用选择性确认和前向确认，改善网络稳定性" "net.ipv4.tcp_sack" "1" "[F] "
-apply_params "TCP 窗口缩放" "支持大容量数据传输" "net.ipv4.tcp_window_scaling" "1"
-apply_params "自动调整接收缓冲区" "维持接收窗口大小，防止缓冲区溢出" "net.ipv4.tcp_moderate_rcvbuf" "1"
-apply_params "接收缓冲区最大值" "设置 max 大小以处理更高的网络吞吐量" "net.core.rmem_max" "33554432"
-apply_params "发送缓冲区最大值" "设置 max 大小以处理更高的网络吞吐量" "net.core.wmem_max" "33554432"
-apply_params "网络设备背压队列长度" "减少网络接口上的数据包聚积" "net.core.netdev_max_backlog" "5000" "eth"
+    if [ -f /proc/meminfo ]; then
+        total_memory_mb=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
+        log "内存大小: ${total_memory_mb}MB"
+    else
+        log "无法检测内存信息"
+    fi
 
-# 设置 QDisc 为 cake，并输出指示
-echo "配置 Cake QDisc 以增强网络性能..."
-apply_params "默认队列管理器" "使用 Cake QDisc（需要外部安装）来管理流量" "net.core.default_qdisc" "cake"
+    if [ -f /proc/cpuinfo ]; then
+        cpu_cores=$(grep -m1 "cpu cores" /proc/cpuinfo | awk '{print $4}')
+        log "CPU核心数: ${cpu_cores}"
+    else
+        log "无法检测CPU信息"
+    fi
 
-# 加载新设置
-echo "相关内核参数已更新，当前加载中..."
-if sysctl -p $sysctl_file; then
-    echo "系统设置已成功重载, 优化完成。"
-    echo "请注意：网络接口当前的 QDisc 配置需要手动设置或重启网络服务才生效。"
-    echo "可选命令：ip link set dev eth0 qdisc cake"
-    echo "或者，重启网络服务以保证新 QDisc 配置生效。"
-else
-    echo "错误：系统设置重载失败，请手动检查并修复。查看详细信息，请尝试：less command_output.txt"
-    echo -e "执行的命令是 `sysctl -p ${sysctl_file}`\n下面是命令输出："
-    sudo sysctl -p $sysctl_file 2>&1 | tee "/tmp/command_output.txt"
-    echo 
-    echo "脚本因错误终止。请解决问题后重新运行该脚本。"
-    exit 1
-fi
+    echo "$total_memory_mb $cpu_cores"
+}
+
+# 动态生成网络优化参数
+generate_dynamic_params() {
+    local total_memory_mb=$1
+    local cpu_cores=$2
+    log "根据硬件生成动态网络优化参数..."
+
+    local params="net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 4096
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_window_scaling = 1
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432"
+
+    if [ "$cpu_cores" -le 2 ]; then
+        params="${params}
+net.core.netdev_max_backlog = 5000
+net.core.somaxconn = 2048"
+    else
+        params="${params}
+net.core.netdev_max_backlog = 30000
+net.core.somaxconn = 8192"
+    fi
+
+    echo "$params"
+}
+
+# 固定生成网络优化参数
+generate_fixed_params() {
+    log "生成固定网络优化参数..."
+    cat <<EOF
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 4096
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_window_scaling = 1
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.core.netdev_max_backlog = 10000
+net.core.somaxconn = 2048
+EOF
+}
+
+# 检测系统支持的 QDisc
+detect_qdisc_support() {
+    log "检测当前系统支持的 QDisc..."
+    if tc qdisc add dev lo root cake 2>/dev/null; then
+        log "检测到支持 Cake QDisc"
+        tc qdisc del dev lo root cake
+        echo "cake"
+    else
+        log "未检测到 Cake QDisc，切换到 FQ QDisc"
+        echo "fq"
+    fi
+}
+
+# 配置 QDisc
+configure_qdisc() {
+    local qdisc
+    qdisc=$(detect_qdisc_support)
+
+    log "设置默认 QDisc 为: $qdisc"
+    echo "net.core.default_qdisc = $qdisc" >>"$SYSCTL_FILE"
+
+    if [ "$qdisc" == "cake" ]; then
+        log "推荐命令: ip link set dev <接口名> qdisc cake"
+    else
+        log "推荐命令: ip link set dev <接口名> qdisc fq"
+    fi
+}
+
+# 应用优化参数
+apply_optimization() {
+    log "应用优化参数..."
+    backup_file "$SYSCTL_FILE"
+
+    local params="$1"
+    echo "$params" >"$SYSCTL_FILE"
+
+    if sysctl -p; then
+        log "优化参数已成功加载"
+    else
+        log "加载优化参数失败，请检查日志 $LOG_FILE"
+        exit 1
+    fi
+}
+
+# 显示帮助信息
+show_help() {
+    cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --mode dynamic    根据硬件动态生成网络优化参数（默认）
+  --mode fixed      使用固定网络优化参数
+  --help            显示此帮助信息
+EOF
+    exit 0
+}
+
+# 解析命令行参数
+parse_args() {
+    local mode="dynamic"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --mode)
+            if [[ "$2" == "dynamic" || "$2" == "fixed" ]]; then
+                mode="$2"
+                shift 2
+            else
+                log "无效模式: $2"
+                show_help
+            fi
+            ;;
+        --help)
+            show_help
+            ;;
+        *)
+            log "未知选项: $1"
+            show_help
+            ;;
+        esac
+    done
+
+    echo "$mode"
+}
+
+# 主函数
+main() {
+    log "开始优化流程..."
+
+    # 解析命令行参数
+    local mode
+    mode=$(parse_args "$@")
+
+    # 检测硬件配置
+    local total_memory_mb
+    local cpu_cores
+    read total_memory_mb cpu_cores < <(detect_hardware)
+
+    # 生成优化参数
+    local optimization_params
+    if [ "$mode" == "dynamic" ]; then
+        optimization_params=$(generate_dynamic_params "$total_memory_mb" "$cpu_cores")
+    else
+        optimization_params=$(generate_fixed_params)
+    fi
+
+    # 应用优化参数
+    apply_optimization "$optimization_params"
+
+    # 配置 QDisc
+    configure_qdisc
+
+    log "网络优化完成！建议重启系统以确保所有设置生效。"
+}
+
+main "$@"
