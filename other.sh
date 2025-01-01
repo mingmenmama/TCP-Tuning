@@ -3,6 +3,7 @@ set -euo pipefail
 
 LOG_FILE="/var/log/server-optimization.log"
 BACKUP_DIR="/root/system_backup"
+
 declare release=""
 declare -i total_memory_mb=0
 declare -i cpu_cores=0
@@ -56,6 +57,27 @@ check_system() {
     return 1
 }
 
+detect_cpu() {
+    OUT_INFO "[信息] 检测CPU配置..."
+    if [ ! -f /proc/cpuinfo ]; then
+        OUT_ERROR "[错误] 无法访问 /proc/cpuinfo"
+        return 1
+    fi
+
+    cpu_cores=$(grep "cpu cores" /proc/cpuinfo | uniq | awk '{print $4}')
+    cpu_threads=$(grep -c processor /proc/cpuinfo)
+}
+
+detect_memory() {
+    OUT_INFO "[信息] 检测内存配置..."
+    if [ -f /proc/meminfo ]; then
+        total_memory_mb=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
+    else
+        OUT_ERROR "[错误] 无法检测内存大小"
+        return 1
+    fi
+}
+
 install_requirements() {
     OUT_INFO "[信息] 安装必要工具..."
     if [ "${release}" = "centos" ]; then
@@ -66,103 +88,79 @@ install_requirements() {
         apt-get install -y wget curl chrony
     fi
     OUT_SUCCESS "[成功] 工具安装完成"
-    return 0
-}
-
-configure_dns() {
-    OUT_INFO "配置系统DNS..."
-
-    if [ ! -d "${BACKUP_DIR}" ]; then
-        mkdir -p "${BACKUP_DIR}"
-    fi
-
-    if [ -L /etc/resolv.conf ]; then
-        rm -f /etc/resolv.conf
-    fi
-
-    if [ -f /etc/resolv.conf ]; then
-        chattr -i /etc/resolv.conf 2>/dev/null || true
-        mv /etc/resolv.conf "${BACKUP_DIR}/resolv.conf.bak"
-    fi
-
-    cat > /etc/resolv.conf << 'EOF'
-options timeout:2 attempts:3 rotate
-nameserver 1.1.1.1
-nameserver 8.8.8.8
-nameserver 9.9.9.9
-nameserver 208.67.222.222
-EOF
-
-    chattr +i /etc/resolv.conf
-    OUT_SUCCESS "DNS配置完成"
-    return 0
 }
 
 configure_ntp() {
     OUT_INFO "配置NTP时间同步..."
-    NTP_SERVICE="chrony.service"
-
     cat > /etc/chrony.conf << 'EOF'
-pool pool.ntp.org iburst
-pool time.google.com iburst
-pool time.cloudflare.com iburst
+server ntp.aliyun.com iburst
+server cn.ntp.org.cn iburst
+server ntp.tencent.com iburst
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 logdir /var/log/chrony
 EOF
 
-    systemctl enable "${NTP_SERVICE}"
-    systemctl restart "${NTP_SERVICE}"
+    systemctl enable chrony.service
+    systemctl restart chrony.service
     OUT_SUCCESS "NTP配置完成"
-    return 0
 }
 
 generate_optimization_params() {
-    echo "net.core.default_qdisc = cake
-net.ipv4.tcp_congestion_control = bbr"
-    return 0
+    local params=""
+
+    if [ $total_memory_mb -eq 0 ] || [ $cpu_cores -eq 0 ]; then
+        params="net.ipv4.tcp_mem = 98304 131072 196608
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 87380 16777216
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.rmem_default = 262144
+net.core.wmem_default = 262144
+net.core.netdev_max_backlog = 5000
+net.core.somaxconn = 1024"
+    else
+        params="net.core.netdev_max_backlog = 100000
+net.core.somaxconn = 65535"
+    fi
+
+    echo "${params}"
 }
 
 optimize_system() {
     OUT_INFO "[信息] 优化系统参数..."
-    if [ -f /etc/sysctl.conf ] && cp -f /etc/sysctl.conf "${BACKUP_DIR}/sysctl.conf.bak"; then
-        local optimization_params
-        optimization_params=$(generate_optimization_params)
-        cat > /etc/sysctl.conf << EOF
+    detect_cpu
+    detect_memory
+
+    local optimization_params
+    optimization_params=$(generate_optimization_params)
+
+    cat > /etc/sysctl.conf << EOF
 net.ipv4.ip_forward = 1
 net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_keepalive_time = 300
-net.ipv4.tcp_keepalive_intvl = 20
-net.ipv4.tcp_keepalive_probes = 3
-net.ipv4.ip_local_port_range = 1024 65535
-net.ipv4.tcp_max_tw_buckets = 550000
-net.ipv4.tcp_max_syn_backlog = 30000
-net.ipv4.tcp_mtu_probing = 1
-net.ipv4.tcp_fastopen = 3
+net.core.default_qdisc = cake
+net.ipv4.tcp_congestion_control = bbr
+
 ${optimization_params}
 EOF
-        sysctl -p
-        OUT_SUCCESS "[成功] 系统参数优化完成"
-    else
-        OUT_ERROR "[错误] 无法备份或写入sysctl配置"
-        return 1
-    fi
+
+    sysctl -p
+    OUT_SUCCESS "[成功] 系统参数优化完成"
 }
 
 main() {
     OUT_INFO "[信息] 开始系统优化..."
     mkdir -p "${BACKUP_DIR}"
-    check_root || exit 1
-    check_system || exit 1
-    install_requirements || exit 1
-    configure_dns || exit 1
-    configure_ntp || exit 1
-    optimize_system || exit 1
-    OUT_SUCCESS "[成功] 系统优化完成！"
-    OUT_INFO "[信息] 建议重启系统使所有优化生效"
+    check_root
+    check_system
+    install_requirements
+    configure_ntp
+    optimize_system
+    OUT_SUCCESS "[成功] 系统优化完成！建议重启系统使所有优化生效。"
 }
 
 main
