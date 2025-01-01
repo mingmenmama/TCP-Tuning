@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# 作者: mingmenmama (修改自原脚本)
-# 描述: 一键网络优化脚本 for Linux 系统 (已修复并增强)
-# 许可证: MIT
+# 作者: mingmenmama
+# 描述: 一键网络优化脚本 for Linux 系统
 
 set -euo pipefail
 
@@ -48,6 +47,7 @@ detect_hardware() {
         log "无法检测CPU信息"
     fi
 
+    # 只输出数字，不要包含其他字符
     echo "$total_memory_mb $cpu_cores"
 }
 
@@ -126,15 +126,17 @@ apply_optimization() {
     backup_file "$SYSCTL_FILE"
 
     local params="$1"
-    echo "$params" >"$SYSCTL_FILE"
-
-    # 修复 sysctl 语法错误问题：使用 sysctl --system 加载所有配置
-    if sysctl --system; then
-        log "优化参数已成功加载"
-    else
-        log "加载优化参数失败，请检查日志 $LOG_FILE 和 /etc/sysctl.conf 语法"
-        exit 1
-    fi
+    while IFS= read -r line; do
+        if [[ -n "$line" && ! "$line" =~ ^# ]]; then # 忽略空行和注释行
+            local key=$(echo "$line" | cut -d '=' -f 1 | xargs)
+            local value=$(echo "$line" | cut -d '=' -f 2 | xargs)
+            if sysctl -w "$key=$value"; then
+                log "成功设置 $key=$value"
+            else
+                log "设置 $key=$value 失败"
+            fi
+        fi
+    done <<< "$params"
 }
 
 # 重启网络服务
